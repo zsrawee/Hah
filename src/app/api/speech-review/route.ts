@@ -220,64 +220,59 @@ export async function POST(req: NextRequest) {
       transcriptionSource = 'openai';
     }
 
+    // ── Build response matching SpeechResult interface ──
+    let score: number;
+    let spokenText: string;
+    let wordAnalysis: { word: string; correct: boolean }[] = [];
+    let feedbackObj: { level: string; emoji: string; message: string; tips: string[] };
+
     if (!transcription) {
       // Demo mode - simulate a review
       const words = originalText.split(/\s+/).filter(Boolean);
       const correctCount = Math.floor(words.length * (0.55 + Math.random() * 0.25));
-      
-      return NextResponse.json({
-        success: true,
-        score: Math.round((correctCount / words.length) * 100),
-        spokenText: words.slice(0, Math.floor(words.length * 0.85)).join(' ') + '...',
-        originalText,
-        feedback: generateFeedback(
-          Math.round((correctCount / words.length) * 100),
-          { correctWords: words.slice(0, correctCount), missingWords: words.slice(correctCount), extraWords: [] }
-        ),
-        comparison: {
-          correctWords: words.slice(0, correctCount),
-          missingWords: words.slice(correctCount),
-          extraWords: [],
-        },
-        wordAnalysis: words.map((w: string, i: number) => ({
-          word: w,
-          correct: i < correctCount,
-        })),
-        demo: true,
-        transcriptionSource,
+      score = Math.round((correctCount / words.length) * 100);
+      spokenText = words.slice(0, Math.floor(words.length * 0.85)).join(' ') + '...';
+      feedbackObj = generateFeedback(score, {
+        correctWords: words.slice(0, correctCount),
+        missingWords: words.slice(correctCount),
+        extraWords: [],
       });
+      wordAnalysis = words.map((w: string, i: number) => ({
+        word: w,
+        correct: i < correctCount,
+      }));
+    } else {
+      // Real transcription
+      const cleanedTranscription = removeDuplicateWords(transcription.trim());
+      spokenText = cleanedTranscription;
+      const comparison = wordSimilarity(originalText, spokenText);
+      score = comparison.score;
+      feedbackObj = generateFeedback(score, comparison);
+
+      const origWords = normalizeArabic(originalText).split(/\s+/).filter(Boolean);
+      const spokenWords = normalizeArabic(spokenText).split(/\s+/).filter(Boolean);
+
+      wordAnalysis = origWords.map(word => ({
+        word,
+        correct: spokenWords.includes(word),
+      }));
     }
 
-    // Clean transcription: remove duplicate words that Whisper sometimes produces
-    const cleanedTranscription = removeDuplicateWords(transcription.trim());
-    const spokenText = cleanedTranscription;
-    
-    // Compare texts
-    const comparison = wordSimilarity(originalText, spokenText);
-    const feedback = generateFeedback(comparison.score, comparison);
-    
-    // Calculate detailed word analysis
-    const origWords = normalizeArabic(originalText).split(/\s+/).filter(Boolean);
-    const spokenWords = normalizeArabic(spokenText).split(/\s+/).filter(Boolean);
-    
-    const wordAnalysis = origWords.map(word => {
-      const found = spokenWords.includes(word);
-      return {
-        word,
-        correct: found,
-      };
-    });
+    // Map internal structure → SpeechResult interface
+    const speechResult = {
+      accuracy: score,
+      wordAccuracy: score,
+      pronunciationScore: score,
+      wordResults: wordAnalysis.map(w => ({
+        word: w.word,
+        match: w.correct,
+        // similarity is optional; omit if not computed
+      })),
+      feedback: feedbackObj.tips,
+      recognizedText: spokenText,
+    };
 
-    return NextResponse.json({
-      success: true,
-      score: comparison.score,
-      spokenText,
-      originalText,
-      feedback,
-      comparison,
-      wordAnalysis,
-      transcriptionSource,
-    });
+    return NextResponse.json(speechResult);
 
   } catch (err: any) {
     console.error('Speech review error:', err);
