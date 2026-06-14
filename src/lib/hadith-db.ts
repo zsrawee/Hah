@@ -94,7 +94,7 @@ function searchInArray(hadiths: any[], terms: string[], field: string, max: numb
 function formatHadith(h: any, collectionId: number, en: any | null, hadithNumber?: number): any {
   if (!h && hadithNumber) {
     return {
-      collection: COLLECTION_NAMES[collectionId]?.slug || '',
+      collection: COLLECTION_NAMES[collectionId]?.ar || '',
       collectionId,
       collection_id: collectionId,
       hadithNumber: [hadithNumber],
@@ -115,7 +115,7 @@ function formatHadith(h: any, collectionId: number, en: any | null, hadithNumber
   const gradesStr = formatGrades(h.grades);
 
   return {
-    collection: COLLECTION_NAMES[collectionId]?.slug || '',
+    collection: COLLECTION_NAMES[collectionId]?.ar || '',
     collectionId,
     collection_id: collectionId,
     urn: `${collectionId}.${num}`,
