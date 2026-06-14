@@ -72,7 +72,7 @@ async function fetchSingleHadith(slug: string, lang: Lang, number: number): Prom
 async function fetchEdition(slug: string, lang: Lang): Promise<{ hadiths: any[] }> {
   const key = `${lang}-${slug}`;
   if (editionCache.has(key)) return editionCache.get(key)!;
-  
+
   const url = `${API_BASE}${lang}-${slug}.json`;
   const data = await fetchJSON(url);
   const result = { hadiths: data.hadiths || [] };
@@ -93,48 +93,62 @@ function searchInArray(hadiths: any[], terms: string[], field: string, max: numb
 
 function formatHadith(h: any, collectionId: number, en: any | null, hadithNumber?: number): any {
   if (!h && hadithNumber) {
-    // Minimal entry if h is null but we have a number
     return {
-      urn: `${collectionId}.${hadithNumber}`,
+      collection: COLLECTION_NAMES[collectionId]?.slug || '',
+      collectionId,
       collection_id: collectionId,
+      hadithNumber: [hadithNumber],
+      urn: `${collectionId}.${hadithNumber}`,
+      display_number: String(hadithNumber),
       book_id: 1,
-      display_number: hadithNumber,
-      order_in_book: hadithNumber,
-      chapter_id: null,
-      narrator_prefix: '', content: '', narrator_postfix: '',
-      narrator_prefix_diacless: '', content_diacless: '', narrator_postfix_diacless: '',
-      comments: '', grades: '', narrators: '', related_hadiths: '',
+      // Flat fields (for search route mapping)
+      content: '', grades: '', narrator_prefix: '', narrator_postfix: '',
+      // Nested fields (for HadithCard / random route direct usage)
+      arabic: { urn: `${collectionId}.${hadithNumber}`, content: '', grades: '', narrator_prefix: '', narrator_postfix: '' },
       english: null,
     };
   }
   if (!h) return null;
-  
+
   const num = hadithNumber || h.hadithnumber;
   const text = h.text || '';
-  
+  const gradesStr = formatGrades(h.grades);
+
   return {
-    urn: `${collectionId}.${num}`,
+    collection: COLLECTION_NAMES[collectionId]?.slug || '',
+    collectionId,
     collection_id: collectionId,
+    urn: `${collectionId}.${num}`,
+    hadithNumber: [num],
+    // Flat fields (for search route mapping which re-wraps them)
+    display_number: String(num),
     book_id: 1,
-    display_number: num,
-    order_in_book: num,
-    chapter_id: h.chapter?.id || null,
-    narrator_prefix: '', // API doesn't separate chain
     content: text,
+    grades: gradesStr,
+    narrator_prefix: '',
     narrator_postfix: '',
-    narrator_prefix_diacless: '',
-    content_diacless: text.replace(/[\u064B-\u065F\u0670]/g, ''),
-    narrator_postfix_diacless: '',
-    comments: '',
-    grades: formatGrades(h.grades),
-    narrators: '',
-    related_hadiths: '',
+    narrator: '',
+    narratorArabic: '',
+    // Nested fields (for HadithCard / random route direct usage)
+    arabic: {
+      urn: `${collectionId}.${num}`,
+      collection_id: collectionId,
+      content: text,
+      narrator_prefix: '',
+      narrator_postfix: '',
+      grades: gradesStr,
+      text,
+    },
     english: en ? {
       urn: `${collectionId}.${num}`,
-      book_id: 1,
-      hadith_number: num,
+      arabic_urn: `${collectionId}.${num}`,
+      collection_id: collectionId,
+      content: en.text || '',
       narrator_prefix: '',
-      body: en.text || '',
+      narrator_postfix: '',
+      grades: formatGrades(en.grades),
+      reference: '',
+      text: en.text || '',
     } : null,
   };
 }
