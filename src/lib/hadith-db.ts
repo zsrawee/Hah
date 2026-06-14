@@ -155,8 +155,40 @@ function formatHadith(h: any, collectionId: number, en: any | null, hadithNumber
 
 function formatGrades(grades: any[]): string {
   if (!grades || grades.length === 0) return '';
-  const arabic = grades.filter(g => /[\u0600-\u06FF]/.test(g.grade || '')).map(g => g.grade).join('، ');
-  return arabic || grades.map(g => g.grade || '').join(', ');
+
+  // Map common English grade terms to Arabic
+  const gradeMap: Record<string, string> = {
+    'sahih': 'صحيح',
+    'hasan': 'حسن',
+    "da'if": 'ضعيف',
+    'daif': 'ضعيف',
+    'mawdu': 'موضوع',
+    'mawdu\'': 'موضوع',
+    'munkar': 'منكر',
+    'qawi': 'قوي',
+    'jayyid': 'جيد',
+    'hasan sahih': 'حسن صحيح',
+    'sahih darussalam': 'صحيح',
+    'hasan darussalam': 'حسن',
+    'daif darussalam': 'ضعيف',
+    'sahih al-albani': 'صحيح',
+    'hasan al-albani': 'حسن',
+  };
+
+  // Extract unique grades and translate
+  const seen = new Set<string>();
+  const arabicGrades: string[] = [];
+
+  for (const g of grades) {
+    let grade = (g.grade || '').trim().toLowerCase();
+    // Remove parenthetical qualifiers like "(Darussalam)"
+    grade = grade.replace(/\s*\([^)]*\)/g, '').trim();
+    if (!grade || seen.has(grade)) continue;
+    seen.add(grade);
+    arabicGrades.push(gradeMap[grade] || g.grade.toString().trim());
+  }
+
+  return arabicGrades.join('، ');
 }
 
 export const hadithAPI = {
