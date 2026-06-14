@@ -1,4 +1,7 @@
 import HadithDB from 'hadith';
+import path from 'path';
+import fs from 'fs';
+import os from 'os';
 
 let db: HadithDB | null = null;
 let isConnecting = false;
@@ -31,6 +34,61 @@ export function getCollectionNames(): Record<number, { ar: string; en: string }>
   return COLLECTION_NAMES;
 }
 
+/** URL for downloading the hadith database (CDN fallback) */
+const DB_DOWNLOAD_URL = process.env.HADITH_DB_URL || 'https://cdn.jsdelivr.net/npm/hadith@1.3.0/data/hadith.db';
+
+/** Check if a file exists */
+function fileExists(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Download the DB file to a writable location (e.g. /tmp) */
+async function downloadDB(targetPath: string): Promise<void> {
+  console.log('⏳ Downloading hadith database from CDN...');
+  const response = await fetch(DB_DOWNLOAD_URL);
+  if (!response.ok) throw new Error(`Failed to download DB: ${response.status} ${response.statusText}`);
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  
+  const dir = path.dirname(targetPath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(targetPath, buffer);
+  console.log('✅ Hadith DB downloaded to', targetPath);
+}
+
+/** Resolve the database path, downloading if needed */
+async function resolveDBPath(): Promise<string> {
+  // 1. Check the default package location
+  const localPaths = [
+    path.join(process.cwd(), 'node_modules', 'hadith', 'data', 'hadith.db'),
+    path.join(__dirname, 'data', 'hadith.db'),
+  ];
+  
+  for (const p of localPaths) {
+    if (fileExists(p)) {
+      console.log('✅ Found local DB at', p);
+      return p;
+    }
+  }
+  
+  // 2. Check /tmp cache (Vercel persists /tmp during active deploys)
+  const cachePath = path.join(os.tmpdir(), 'hadith-cache', 'hadith.db');
+  if (fileExists(cachePath)) {
+    console.log('✅ Found cached DB at', cachePath);
+    return cachePath;
+  }
+  
+  // 3. Download from CDN
+  console.log('⚠️ Local DB not found, downloading from CDN...');
+  await downloadDB(cachePath);
+  return cachePath;
+}
+
 async function getDB(): Promise<HadithDB> {
   if (db) return db;
   
@@ -38,10 +96,11 @@ async function getDB(): Promise<HadithDB> {
     isConnecting = true;
     connectPromise = (async () => {
       try {
-        const instance = new HadithDB();
+        const dbPath = await resolveDBPath();
+        const instance = new HadithDB(dbPath);
         await instance.connect();
         db = instance;
-        console.log('✅ Hadith DB connected');
+        console.log('✅ Hadith DB connected from', dbPath);
       } catch (err) {
         console.error('❌ DB connection failed:', err);
         throw err;
