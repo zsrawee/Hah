@@ -1,11 +1,16 @@
-import HadithDB from 'hadith';
+/**
+ * Hadith database access layer.
+ * Uses sql.js directly (not the `hadith` npm package) to:
+ * 1. Avoid bundling the 133MB data directory from the package on Vercel
+ * 2. Properly configure WASM loading on Vercel serverless
+ * 3. Support bundled DB file (public/data/) for zero-download cold starts
+ */
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
 
-let db: HadithDB | null = null;
-let isConnecting = false;
-let connectPromise: Promise<void> | null = null;
+let SQL: any = null;
+let db: any = null;
 
 const COLLECTION_NAMES: Record<number, { ar: string; en: string }> = {
   1: { ar: 'صحيح البخاري', en: 'Sahih al-Bukhari' },
@@ -34,10 +39,6 @@ export function getCollectionNames(): Record<number, { ar: string; en: string }>
   return COLLECTION_NAMES;
 }
 
-/** URL for downloading the hadith database (CDN fallback). Set HADITH_DB_URL env var for Vercel deployment */
-const DB_DOWNLOAD_URL = process.env.HADITH_DB_URL || '';//cdn.jsdelivr.net/npm/hadith@1.3.0/data/hadith.db';
-
-/** Check if a file exists */
 function fileExists(filePath: string): boolean {
   try {
     return fs.statSync(filePath).isFile();
@@ -46,297 +47,303 @@ function fileExists(filePath: string): boolean {
   }
 }
 
-/** Download the DB file to a writable location (e.g. /tmp) */
+function getDBUrl(): string | null {
+  if (process.env.HADITH_DB_URL) return process.env.HADITH_DB_URL;
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}/data/hadith.db`;
+  return null;
+}
+
 async function downloadDB(targetPath: string): Promise<void> {
-  console.log('⏳ Downloading hadith database from CDN...');
-  const response = await fetch(DB_DOWNLOAD_URL);
+  const url = getDBUrl();
+  if (!url) throw new Error('No download URL configured');
+  console.log('⏳ Downloading hadith database from', url);
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`Failed to download DB: ${response.status} ${response.statusText}`);
-  
   const arrayBuffer = await response.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  
-  const dir = path.dirname(targetPath);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.writeFileSync(targetPath, buffer);
   console.log('✅ Hadith DB downloaded to', targetPath);
 }
 
-/** Resolve the database path, downloading if needed */
 async function resolveDBPath(): Promise<string> {
-  // 1. Check the default package location
-  const localPaths = [
-    path.join(process.cwd(), 'public', 'data', 'hadith.db'),
-    path.join(process.cwd(), 'node_modules', 'hadith', 'data', 'hadith.db'),
-    path.join(__dirname, 'data', 'hadith.db'),
-  ];
-  
-  for (const p of localPaths) {
-    if (fileExists(p)) {
-      console.log('✅ Found local DB at', p);
-      return p;
-    }
-  }
-  
-  // 2. Check /tmp cache (Vercel persists /tmp during active deploys)
+  // 1. Check /tmp cache (warm starts)
   const cachePath = path.join(os.tmpdir(), 'hadith-cache', 'hadith.db');
   if (fileExists(cachePath)) {
-    console.log('✅ Found cached DB at', cachePath);
     return cachePath;
   }
-  
-  // 3. Download from CDN
-  console.log('⚠️ Local DB not found, downloading from CDN...');
-  await downloadDB(cachePath);
-  return cachePath;
-}
 
-async function getDB(): Promise<HadithDB> {
-  if (db) return db;
-  
-  if (!isConnecting) {
-    isConnecting = true;
-    connectPromise = (async () => {
-      try {
-        const dbPath = await resolveDBPath();
-        const instance = new HadithDB(dbPath);
-        await instance.connect();
-        db = instance;
-        console.log('✅ Hadith DB connected from', dbPath);
-      } catch (err) {
-        console.error('❌ DB connection failed:', err);
-        throw err;
-      } finally {
-        isConnecting = false;
-      }
-    })();
+  // 2. Use bundled DB file (primary - works on both Vercel and local after prebuild)
+  // The prebuild script copies node_modules/hadith/data/hadith.db → public/data/hadith.db
+  // On Vercel, this path IS in the function bundle (single 133MB copy, under 250MB limit)
+  const bundledPath = path.join(process.cwd(), 'public', 'data', 'hadith.db');
+  if (fileExists(bundledPath)) {
+    return bundledPath;
   }
-  
-  await connectPromise;
-  return db!;
+
+  // 3. Download from URL (fallback if HADITH_DB_URL is set)
+  if (getDBUrl()) {
+    await downloadDB(cachePath);
+    return cachePath;
+  }
+
+  throw new Error(
+    'Hadith DB not found. Run "npm run prebuild" first. ' +
+    'For Vercel: ensure prebuild script runs during build.'
+  );
 }
 
-// Helper to query English hadiths directly (fixes type issues)
-async function queryEnglishByUrn(urn: string) {
-  const instance = await getDB();
-  const sqlDb = (instance as any).db;
-  if (!sqlDb) return null;
-  
+async function initDB(): Promise<void> {
+  if (db) return;
+  const dbp = await resolveDBPath();
+  const initSqlJs = require('sql.js');
+  SQL = await initSqlJs();
+  const buffer = fs.readFileSync(dbp);
+  db = new SQL.Database(buffer);
+  console.log('✅ Hadith DB connected from', dbp);
+}
+
+function queryAll(sql: string, params: any[] = []): any[] {
+  if (!db) throw new Error('Database not connected');
+  const stmt = db.prepare(sql);
+  if (params.length > 0) stmt.bind(params);
+  const rows: any[] = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+function queryOne(sql: string, params: any[] = []): any | null {
+  const rows = queryAll(sql, params);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+/**
+ * Format a raw hadith row from hadith_content table into a clean object.
+ */
+function formatHadith(row: any): any {
+  if (!row) return null;
+  return {
+    urn: String(row.urn ?? ''),
+    collection_id: parseInt(row.collection_id),
+    book_id: parseInt(row.book_id),
+    chapter_id: row.chapter_id ? parseInt(row.chapter_id) : null,
+    display_number: parseFloat(row.display_number) || 0,
+    order_in_book: parseInt(row.order_in_book) || 0,
+    narrator_prefix: row.narrator_prefix || '',
+    content: row.content || '',
+    narrator_postfix: row.narrator_postfix || '',
+    narrator_prefix_diacless: row.narrator_prefix_diacless || '',
+    content_diacless: row.content_diacless || '',
+    narrator_postfix_diacless: row.narrator_postfix_diacless || '',
+    comments: row.comments || '',
+    grades: row.grades || '',
+    narrators: row.narrators || '',
+    related_hadiths: row.related_hadiths || '',
+  };
+}
+
+async function queryEnglishByUrn(urn: string): Promise<any | null> {
+  if (!db) return null;
   try {
-    const stmt = sqlDb.prepare(`
-      SELECT 
-        c0 as arabic_urn,
-        c1 as urn,
-        c2 as collection_id,
-        c3 as narrator_prefix,
-        c4 as content,
-        c5 as narrator_postfix,
-        c6 as comments,
-        c7 as grades,
-        c8 as reference
-      FROM hadith_en_content 
-      WHERE c0 = ?
-    `);
-    stmt.bind([parseInt(urn)]);
-    let result = null;
-    if (stmt.step()) {
-      result = stmt.getAsObject();
-    }
-    stmt.free();
-    return result;
+    const sql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as body FROM hadith_english WHERE c0 = ? LIMIT 1';
+    return queryOne(sql, [urn]);
   } catch {
     return null;
   }
 }
 
-// Search Arabic hadith content
-async function searchArabicContent(query: string, collectionId?: number, limit = 30, offset = 0) {
-  const instance = await getDB();
-  const sqlDb = (instance as any).db;
-  if (!sqlDb) return [];
-  
-  const likeQuery = `%${query.replace(/'/g, "''")}%`;
-  
-  let sql = `
-    SELECT 
-      c0 as urn, c1 as collection_id, c2 as book_id,
-      c3 as display_number, c4 as order_in_book,
-      c6 as narrator_prefix, c7 as content,
-      c8 as narrator_postfix, c13 as grades
-    FROM hadith_content
-    WHERE c7 LIKE ?
-  `;
-  const params: any[] = [likeQuery];
-  
-  if (collectionId) {
-    sql += ' AND c1 = ?';
-    params.push(collectionId);
-  }
-  sql += ' ORDER BY c1, c4 LIMIT ? OFFSET ?';
-  params.push(limit + 1, offset);
-  
-  const stmt = sqlDb.prepare(sql);
-  stmt.bind(params);
-  const results: any[] = [];
-  while (stmt.step()) results.push(stmt.getAsObject());
-  stmt.free();
-  return results.slice(0, limit);
-}
-
-// Search English hadith content
-async function searchEnglishContent(query: string, collectionId?: number, limit = 30, offset = 0) {
-  const instance = await getDB();
-  const sqlDb = (instance as any).db;
-  if (!sqlDb) return [];
-  
-  const likeQuery = `%${query.replace(/'/g, "''")}%`;
-  
-  let sql = `
-    SELECT 
-      c0 as arabic_urn, c1 as urn, c2 as collection_id,
-      c3 as narrator_prefix, c4 as content,
-      c5 as narrator_postfix, c7 as grades, c8 as reference
-    FROM hadith_en_content
-    WHERE c4 LIKE ?
-  `;
-  const params: any[] = [likeQuery];
-  
-  if (collectionId) {
-    sql += ' AND c2 = ?';
-    params.push(collectionId);
-  }
-  sql += ' ORDER BY c2, c0 LIMIT ? OFFSET ?';
-  params.push(limit + 1, offset);
-  
-  const stmt = sqlDb.prepare(sql);
-  stmt.bind(params);
-  const results: any[] = [];
-  while (stmt.step()) results.push(stmt.getAsObject());
-  stmt.free();
-  return results.slice(0, limit);
-}
-
 export const hadithAPI = {
-  getDB,
-  
-  async getCollections() {
-    const instance = await getDB();
-    return instance.getCollections();
+  async ensureConnected(): Promise<void> {
+    await initDB();
   },
-  
-  async getCollection(id: number) {
-    const instance = await getDB();
-    return instance.getCollection(id);
-  },
-  
-  async getBooks(collectionId: number) {
-    const instance = await getDB();
-    return instance.getBooks(collectionId);
-  },
-  
-  async getHadiths(collectionId: number, options?: { limit?: number; offset?: number; bookId?: number }) {
-    const instance = await getDB();
-    const hadiths = await instance.getHadithsByCollection(collectionId, {
-      limit: options?.limit || 20,
-      offset: options?.offset || 0,
-      bookId: options?.bookId || null,
-    });
-    
-    const enHadiths = [];
-    for (const h of hadiths) {
-      const en = await queryEnglishByUrn(h.urn);
-      if (en) enHadiths.push(en);
-    }
-    
-    return { arabic: hadiths, english: enHadiths };
-  },
-  
-  async getHadithByUrn(urn: string) {
-    const instance = await getDB();
-    let arabic = await instance.getHadithByUrn(urn);
-    
-    // Fallback to direct query
-    if (!arabic) {
-      const sqlDb = (instance as any).db;
-      if (sqlDb) {
-        const stmt = sqlDb.prepare(`
-          SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
-                 c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix, c7 as content,
-                 c8 as narrator_postfix, c13 as grades, c14 as narrators, c12 as comments
-          FROM hadith_content WHERE c0 = ?
-        `);
-        stmt.bind([parseInt(urn)]);
-        if (stmt.step()) arabic = stmt.getAsObject();
-        stmt.free();
-      }
-    }
-    
-    const english = await queryEnglishByUrn(urn);
-    return { arabic, english };
-  },
-  
-  async getRandomHadith(collectionId?: number) {
-    const instance = await getDB();
-    const sqlDb = (instance as any).db;
-    if (!sqlDb) throw new Error('DB not connected');
 
-    // Fast random: count rows, pick offset, LIMIT 1
-    // ORDER BY RANDOM() scans the entire table — very slow for 160K rows
-    let countSql = 'SELECT COUNT(*) as cnt FROM hadith_content';
-    let querySql = `
+  async getCollections(): Promise<any[]> {
+    await initDB();
+    return queryAll('SELECT * FROM collection');
+  },
+
+  async getCollection(id: number): Promise<any | null> {
+    await initDB();
+    return queryOne('SELECT * FROM collection WHERE id = ?', [id]);
+  },
+
+  async getBooks(collectionId?: number): Promise<any[]> {
+    await initDB();
+    if (collectionId !== undefined) {
+      return queryAll('SELECT * FROM book WHERE collection_id = ? ORDER BY id', [collectionId]);
+    }
+    return queryAll('SELECT * FROM book ORDER BY id');
+  },
+
+  async getHadiths(
+    collectionId: number,
+    options: { limit?: number; offset?: number; bookId?: number } = {}
+  ): Promise<{ hadiths: any[]; total: number }> {
+    await initDB();
+
+    const countSql = 'SELECT COUNT(*) as total FROM hadith_content WHERE c1 = ?';
+    const countParams: any[] = [collectionId];
+    if (options.bookId) {
+      countSql += ' AND c2 = ?';
+      countParams.push(options.bookId);
+    }
+    const countResult = queryOne(countSql, countParams);
+    const total = countResult?.total || 0;
+
+    const limit = options.limit || 20;
+    const offset = options.offset || 0;
+    let dataSql = `
       SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
-             c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix, c7 as content,
-             c8 as narrator_postfix, c9 as narrator_prefix_diacless,
+             c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix,
+             c7 as content, c8 as narrator_postfix, c9 as narrator_prefix_diacless,
              c10 as content_diacless, c11 as narrator_postfix_diacless,
              c12 as comments, c13 as grades, c14 as narrators, c15 as related_hadiths
-      FROM hadith_content
+      FROM hadith_content WHERE c1 = ?
     `;
-    const params: any[] = [];
-    
-    if (collectionId !== undefined && collectionId !== null) {
-      const where = ' WHERE c1 = ?';
-      countSql += where;
-      querySql += where;
-      params.push(collectionId);
+    const dataParams: any[] = [collectionId];
+    if (options.bookId) {
+      dataSql += ' AND c2 = ?';
+      dataParams.push(options.bookId);
     }
+    dataSql += ' ORDER BY c4 LIMIT ? OFFSET ?';
+    dataParams.push(limit, offset);
 
-    const countStmt = sqlDb.prepare(countSql);
-    if (params.length) countStmt.bind(params);
-    let totalRows = 0;
-    if (countStmt.step()) {
-      totalRows = countStmt.getAsObject().cnt;
-    }
-    countStmt.free();
+    const rows = queryAll(dataSql, dataParams);
+    const hadiths = rows.map(formatHadith);
+    const hadithsWithEnglish = await Promise.all(
+      hadiths.map(async (h) => {
+        const en = h.urn ? await queryEnglishByUrn(h.urn) : null;
+        return { ...h, english: en };
+      })
+    );
 
-    if (totalRows === 0) return { arabic: null, english: null };
-
-    const offset = Math.floor(Math.random() * totalRows);
-    querySql += ' LIMIT 1 OFFSET ?';
-    
-    const stmt = sqlDb.prepare(querySql);
-    stmt.bind([...params, offset]);
-    
-    let arabic = null;
-    if (stmt.step()) {
-      arabic = stmt.getAsObject();
-    }
-    stmt.free();
-
-    let english = null;
-    if (arabic) english = await queryEnglishByUrn(arabic.urn);
-    return { arabic, english };
+    return { hadiths: hadithsWithEnglish, total };
   },
-  
-  async search(query: string, collectionId?: number, limit = 30) {
-    const [arabic, english] = await Promise.all([
-      searchArabicContent(query, collectionId, limit),
-      searchEnglishContent(query, collectionId, limit),
-    ]);
-    return { arabic, english, total: arabic.length + english.length };
+
+  async getHadithByUrn(urn: string | number): Promise<any | null> {
+    await initDB();
+    const sql = `
+      SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
+             c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix,
+             c7 as content, c8 as narrator_postfix, c9 as narrator_prefix_diacless,
+             c10 as content_diacless, c11 as narrator_postfix_diacless,
+             c12 as comments, c13 as grades, c14 as narrators, c15 as related_hadiths
+      FROM hadith_content WHERE c0 = ? LIMIT 1
+    `;
+    const row = queryOne(sql, [String(urn)]);
+    if (!row) return null;
+    const hadith = formatHadith(row);
+    const en = hadith.urn ? await queryEnglishByUrn(hadith.urn) : null;
+    return { ...hadith, english: en };
   },
-  
-  async getStats() {
-    const instance = await getDB();
-    const info = await instance.getInfo();
-    return info;
+
+  async getRandomHadith(collectionId?: number, excludeUrn?: string): Promise<any | null> {
+    await initDB();
+
+    let countSql = 'SELECT COUNT(*) as cnt FROM hadith_content';
+    const countParams: any[] = [];
+    if (collectionId) { countSql += ' WHERE c1 = ?'; countParams.push(collectionId); }
+    const cnt = queryOne(countSql, countParams);
+    const total = cnt?.cnt || 0;
+    if (total === 0) return null;
+
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const offset = Math.floor(Math.random() * total);
+      let sql = `
+        SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
+               c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix,
+               c7 as content, c8 as narrator_postfix, c9 as narrator_prefix_diacless,
+               c10 as content_diacless, c11 as narrator_postfix_diacless,
+               c12 as comments, c13 as grades, c14 as narrators, c15 as related_hadiths
+        FROM hadith_content
+      `;
+      const params: any[] = [];
+      if (collectionId) { sql += ' WHERE c1 = ?'; params.push(collectionId); }
+      sql += ' LIMIT 1 OFFSET ?';
+      params.push(offset);
+
+      const row = queryOne(sql, params);
+      if (!row) return null;
+
+      const hadith = formatHadith(row);
+      if (excludeUrn && hadith.urn === excludeUrn) continue;
+
+      const en = hadith.urn ? await queryEnglishByUrn(hadith.urn) : null;
+      return { ...hadith, english: en };
+    }
+    return null;
+  },
+
+  async search(
+    query: string,
+    collectionId?: number,
+    limit?: number
+  ): Promise<{ arabic: any[]; english: any[]; total: number }> {
+    await initDB();
+    const searchLimit = limit || 20;
+
+    // Arabic search by diacritic-less content
+    const arabicTerms = query.split(/[\s,]+/).filter((t) => t.length > 0).map((t) => `%${t}%`);
+
+    let arabicSql = `
+      SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
+             c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix,
+             c7 as content, c8 as narrator_postfix, c9 as narrator_prefix_diacless,
+             c10 as content_diacless, c11 as narrator_postfix_diacless,
+             c12 as comments, c13 as grades, c14 as narrators, c15 as related_hadiths
+      FROM hadith_content WHERE 1=1
+    `;
+    const arabicParams: any[] = [];
+    for (const term of arabicTerms) {
+      arabicSql += ' AND c10 LIKE ?';
+      arabicParams.push(term);
+    }
+    if (collectionId) { arabicSql += ' AND c1 = ?'; arabicParams.push(collectionId); }
+    arabicSql += ' LIMIT ?';
+    arabicParams.push(searchLimit);
+
+    const arabicRows = queryAll(arabicSql, arabicParams).map(formatHadith);
+
+    // English search
+    const englishTerms = query.split(/[\s,]+/).filter((t) => /[a-zA-Z]/.test(t)).map((t) => `%${t}%`);
+    let englishHadiths: any[] = [];
+    if (englishTerms.length > 0) {
+      let engSql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as body FROM hadith_english WHERE 1=1';
+      const engParams: any[] = [];
+      for (const term of englishTerms) {
+        engSql += ' AND c3 LIKE ?';
+        engParams.push(term);
+      }
+      if (collectionId) {
+        engSql += ' AND c0 IN (SELECT c0 FROM hadith_content WHERE c1 = ?)';
+        engParams.push(collectionId);
+      }
+      engSql += ' LIMIT ?';
+      engParams.push(searchLimit);
+      englishHadiths = queryAll(engSql, engParams);
+    }
+
+    return {
+      arabic: arabicRows,
+      english: englishHadiths,
+      total: arabicRows.length + englishHadiths.length,
+    };
+  },
+
+  async getStats(): Promise<any> {
+    await initDB();
+    const collections = await this.getCollections();
+    const stats = queryAll('SELECT c1 as collection_id, COUNT(*) as count FROM hadith_content GROUP BY c1');
+    return {
+      version: '1.0.0',
+      collections: collections.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        title_en: c.title_en,
+        status: c.status,
+      })),
+      statistics: stats,
+    };
   },
 };
