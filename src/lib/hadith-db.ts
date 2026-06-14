@@ -65,6 +65,7 @@ async function downloadDB(targetPath: string): Promise<void> {
 async function resolveDBPath(): Promise<string> {
   // 1. Check the default package location
   const localPaths = [
+    path.join(process.cwd(), 'public', 'data', 'hadith.db'),
     path.join(process.cwd(), 'node_modules', 'hadith', 'data', 'hadith.db'),
     path.join(__dirname, 'data', 'hadith.db'),
   ];
