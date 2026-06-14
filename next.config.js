@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['sql.js'],
+    // No external packages needed - all data fetched via HTTP API
   },
 };
 
