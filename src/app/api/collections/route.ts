@@ -6,6 +6,7 @@ export async function GET() {
     const collections = await hadithAPI.getCollections();
     return NextResponse.json(collections);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (collections):', err);
+    return NextResponse.json({ error: 'An error occurred while fetching collections.' }, { status: 500 });
   }
 }

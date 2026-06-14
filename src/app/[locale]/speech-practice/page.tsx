@@ -44,6 +44,7 @@ function SpeechPracticeContent() {
     setLoading(true);
     try {
       const res = await fetch("/api/random");
+      if (!res.ok) throw new Error('Failed to fetch');
       setHadith(await res.json());
     } catch {
       setError("Failed to load hadith");
@@ -93,7 +94,8 @@ function SpeechPracticeContent() {
       );
       setResult(speechResult);
     } catch (err: any) {
-      setError(err?.message || "Failed to analyze recording. Check console for details.");
+      console.error('Speech analysis error:', err);
+      setError('An error occurred during speech analysis. Please try again.');
     } finally {
       setIsRecording(false);
     }

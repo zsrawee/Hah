@@ -19,9 +19,15 @@ export default function RandomPage() {
   const fetchRandom = () => {
     setLoading(true);
     fetch("/api/random")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
       .then(setHadith)
-      .catch(() => {})
+      .catch((err) => {
+        console.error('Random hadith fetch error:', err);
+        setHadith(null);
+      })
       .finally(() => setLoading(false));
   };
 

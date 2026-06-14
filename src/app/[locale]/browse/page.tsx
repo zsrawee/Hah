@@ -26,9 +26,12 @@ export default function BrowsePage() {
 
   useEffect(() => {
     fetch("/api/books")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
       .then(setBooks)
-      .catch(() => {})
+      .catch((err) => console.error('Books fetch error:', err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -39,13 +42,16 @@ export default function BrowsePage() {
     }
     setLoadingHadiths(true);
     fetch(`/api/hadiths?collection=${selectedBook}&page=${page}&limit=20`)
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
       .then((data) => {
         const newHadiths = data.hadiths || data.arabic || data;
         setHadiths((prev) => (page === 1 ? newHadiths : [...prev, ...newHadiths]));
         setHasMore(Array.isArray(newHadiths) && newHadiths.length === 20);
       })
-      .catch(() => {})
+      .catch((err) => console.error('Hadiths fetch error:', err))
       .finally(() => setLoadingHadiths(false));
   }, [selectedBook, page]);
 

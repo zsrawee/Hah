@@ -7,6 +7,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     if (!collection) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json(collection);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (collection by id):', err);
+    return NextResponse.json({ error: 'An error occurred while fetching the collection.' }, { status: 500 });
   }
 }

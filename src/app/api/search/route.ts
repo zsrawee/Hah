@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
     const results = await hadithAPI.search(query, collectionId, limit);
     return NextResponse.json({ results, count: results.total });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (search):', err);
+    return NextResponse.json({ error: 'An error occurred while searching.' }, { status: 500 });
   }
 }

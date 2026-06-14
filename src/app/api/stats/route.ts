@@ -6,6 +6,7 @@ export async function GET() {
     const stats = await hadithAPI.getStats();
     return NextResponse.json(stats);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (stats):', err);
+    return NextResponse.json({ error: 'An error occurred while fetching statistics.' }, { status: 500 });
   }
 }

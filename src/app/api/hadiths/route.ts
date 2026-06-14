@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
     const data = await hadithAPI.getHadiths(collectionId, { limit, offset, bookId });
     return NextResponse.json(data);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (hadiths):', err);
+    return NextResponse.json({ error: 'An error occurred while fetching hadiths.' }, { status: 500 });
   }
 }

@@ -24,13 +24,19 @@ export default function ClientHome() {
 
   useEffect(() => {
     fetch("/api/random")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
       .then(setFeatured)
-      .catch(() => {});
+      .catch((err) => console.error('Home error:', err));
     fetch("/api/stats")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error('Failed to fetch');
+        return r.json();
+      })
       .then((data) => setStats(data.statistics || data))
-      .catch(() => {});
+      .catch((err) => console.error('Stats error:', err));
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {

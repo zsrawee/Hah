@@ -7,6 +7,7 @@ export async function GET(_req: Request, { params }: { params: { urn: string } }
     if (!data.arabic) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json(data);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('API Error (hadith by URN):', err);
+    return NextResponse.json({ error: 'An error occurred while fetching the hadith.' }, { status: 500 });
   }
 }

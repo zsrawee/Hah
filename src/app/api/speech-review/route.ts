@@ -304,6 +304,7 @@ export async function POST(req: NextRequest) {
           transcription = await transcribeWithOpenAI(audioFile, process.env.OPENAI_API_KEY!);
         }
       } catch (err: any) {
+        console.error('Transcription failed:', err);
         return NextResponse.json(
           {
             accuracy: 0,
@@ -311,8 +312,8 @@ export async function POST(req: NextRequest) {
             pronunciationScore: 0,
             wordResults: [],
             feedback: [
-              '❌ Transcription failed.',
-              `Error: ${err.message || 'Unknown error'}`,
+              'Transcription failed.',
+              'Please check your API configuration and try again.',
             ],
             recognizedText: '',
           },
@@ -357,7 +358,7 @@ export async function POST(req: NextRequest) {
         wordAccuracy: 0,
         pronunciationScore: 0,
         wordResults: [],
-        feedback: [`Unexpected error: ${err.message || 'Unknown'}`],
+        feedback: ['An unexpected error occurred during speech analysis.'],
         recognizedText: '',
       },
       { status: 200 },
