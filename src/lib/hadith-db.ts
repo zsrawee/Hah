@@ -333,17 +333,13 @@ export const hadithAPI = {
 
   async getStats(): Promise<any> {
     await initDB();
-    const collections = await this.getCollections();
-    const stats = queryAll('SELECT c1 as collection_id, COUNT(*) as count FROM hadith_content GROUP BY c1');
+    const collectionCount = queryOne('SELECT COUNT(*) as cnt FROM collection')?.cnt || 0;
+    const bookCount = queryOne('SELECT COUNT(*) as cnt FROM book')?.cnt || 0;
+    const hadithCount = queryOne('SELECT COUNT(*) as cnt FROM hadith_content')?.cnt || 0;
     return {
-      version: '1.0.0',
-      collections: collections.map((c: any) => ({
-        id: c.id,
-        title: c.title,
-        title_en: c.title_en,
-        status: c.status,
-      })),
-      statistics: stats,
+      collection_count: collectionCount,
+      total_books: bookCount,
+      total_chapters: hadithCount,
     };
   },
 };
