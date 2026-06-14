@@ -6,8 +6,8 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const collectionId = searchParams.get('collection') ? parseInt(searchParams.get('collection')!) : undefined;
     
-    const data = await hadithAPI.getRandomHadith(collectionId);
-    if (!data.arabic) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const data = await hadithAPI.getRandomHadith(collectionId, undefined);
+    if (!data) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json(data);
   } catch (err: any) {
     console.error('API Error (random):', err);
