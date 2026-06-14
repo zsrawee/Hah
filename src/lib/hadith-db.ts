@@ -146,7 +146,7 @@ function formatHadith(row: any): any {
 async function queryEnglishByUrn(urn: string): Promise<any | null> {
   if (!db) return null;
   try {
-    const sql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as body FROM hadith_english WHERE c0 = ? LIMIT 1';
+    const sql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as narrator_prefix, c4 as body FROM hadith_en_content WHERE c0 = ? LIMIT 1';
     return queryOne(sql, [urn]);
   } catch {
     return null;
@@ -309,10 +309,11 @@ export const hadithAPI = {
     const englishTerms = query.split(/[\s,]+/).filter((t) => /[a-zA-Z]/.test(t)).map((t) => `%${t}%`);
     let englishHadiths: any[] = [];
     if (englishTerms.length > 0) {
-      let engSql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as body FROM hadith_english WHERE 1=1';
+      let engSql = 'SELECT c0 as urn, c1 as book_id, c2 as hadith_number, c3 as narrator_prefix, c4 as body FROM hadith_en_content WHERE 1=1';
       const engParams: any[] = [];
       for (const term of englishTerms) {
-        engSql += ' AND c3 LIKE ?';
+        engSql += ' AND (c3 LIKE ? OR c4 LIKE ?)';
+        engParams.push(term);
         engParams.push(term);
       }
       if (collectionId) {
