@@ -1,18 +1,3 @@
-# iOS project generated files
-ios/*.xcodeproj/
-ios/*.xcworkspace/
-ios/DerivedData/
-ios/Pods/
-
-# Android generated files
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-android/.idea/
-*.iml
-
-# General
-.DS_Store
-*.swp
-*.swo
+node_modules/
+.next/
+.env*

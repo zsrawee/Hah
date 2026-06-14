@@ -1,227 +1,236 @@
-'use client';
+"use client";
 
-import { useTranslations } from 'next-intl';
-import { getCollectionName } from '@/lib/collection-names';
-import { useState } from 'react';
+import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { Hadith } from "@/types/hadith";
+import { useTranslations, useLocale } from "next-intl";
+import { useFavorites } from "@/context/FavoritesContext";
+import { useHistory } from "@/context/HistoryContext";
+import { extractSanad, extractMatn, getGradeInfo, getHadithNumber, getReference } from "@/lib/hadithUtils";
 
-interface Props {
-  arabic: any;
-  english?: any | null;
-  featured?: boolean;
+interface HadithCardProps {
+  hadith: Hadith;
+  index?: number;
   detailed?: boolean;
+  showIndex?: boolean;
+  isActive?: boolean;
+  onClick?: () => void;
 }
 
-function extractGrade(gradesStr: string) {
-  if (!gradesStr) return null;
-  const lower = gradesStr.toLowerCase();
-  if (lower.includes('صحيح') || lower.includes('sahih')) 
-    return { label: 'Sahih (صحيح)', cls: 'badge-sahih', icon: 'check' };
-  if (lower.includes('حسن') || lower.includes('hasan')) 
-    return { label: 'Hasan (حسن)', cls: 'badge-hasan', icon: 'star' };
-  if (lower.includes('ضعيف') || lower.includes('daif') || lower.includes('dhaif')) 
-    return { label: "Da'if (ضعيف)", cls: 'badge-daif', icon: 'alert' };
-  return { label: gradesStr.slice(0, 30), cls: 'badge-sahih', icon: 'tag' };
-}
+const collectionNames: Record<string, string> = {
+  "sahih-bukhari": "Sahih al-Bukhari",
+  "sahih-muslim": "Sahih Muslim",
+  "sunan-abu-dawud": "Sunan Abu Dawud",
+  "sunan-ibn-majah": "Sunan Ibn Majah",
+  "jami-at-tirmidhi": "Jami at-Tirmidhi",
+  "sunan-an-nasai": "Sunan an-Nasa'i",
+};
 
-function extractSanad(arabic: any): string[] {
-  const narrators: string[] = [];
-  if (arabic.narrators) {
-    try {
-      const parsed = JSON.parse(arabic.narrators);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((n: any) => {
-          if (typeof n === 'string') narrators.push(n);
-          else if (n.name) narrators.push(n.name);
-        });
-      }
-    } catch {}
-  }
-  if (narrators.length === 0 && arabic.narrator_prefix) {
-    const parts = arabic.narrator_prefix.split(/،|,|عَنْ|حَدَّثَنَا|حَدَّثَنِي|أَخْبَرَنَا|أَنَّ/).filter((p: string) => p.trim());
-    parts.forEach((p: string) => {
-      const trimmed = p.trim();
-      if (trimmed.length > 3) narrators.push(trimmed);
-    });
-  }
-  return narrators;
-}
+const collectionNamesAr: Record<string, string> = {
+  "sahih-bukhari": "صحيح البخاري",
+  "sahih-muslim": "صحيح مسلم",
+  "sunan-abu-dawud": "سنن أبي داود",
+  "sunan-ibn-majah": "سنن ابن ماجه",
+  "jami-at-tirmidhi": "جامع الترمذي",
+  "sunan-an-nasai": "سنن النسائي",
+};
 
-export default function HadithCard({ arabic, english, featured, detailed }: Props) {
-  const t = useTranslations();
-  const [copied, setCopied] = useState<'arabic' | 'english' | null>(null);
-  const grade = extractGrade(arabic?.grades || '');
-  const sanad = extractSanad(arabic);
-  const colName = getCollectionName(arabic?.collection_id || 1);
-
-  const copyText = async (lang: 'arabic' | 'english') => {
-    const text = lang === 'arabic' ? arabic?.content : english?.content;
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(lang);
-      setTimeout(() => setCopied(null), 2000);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-      setCopied(lang);
-      setTimeout(() => setCopied(null), 2000);
-    }
+function normalizeHadith(hadith: Hadith) {
+  const englishText = hadith.english?.text || hadith.english?.content || "";
+  const extractText = (text: string) => {
+    const match = text.match(/:\s*([\s\S]+)/);
+    return match ? match[1].trim() : text.trim();
   };
 
-  if (!arabic) return null;
+  return {
+    cleanArabic: extractMatn(hadith),
+    cleanEnglish: extractText(englishText),
+    sanad: extractSanad(hadith),
+    gradeInfo: getGradeInfo(hadith),
+    rangeStr: getHadithNumber(hadith),
+    narratorArabic: hadith.narratorArabic || hadith.narrator,
+  };
+}
+
+export default function HadithCard({
+  hadith,
+  detailed = false,
+  onClick,
+}: HadithCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const router = useRouter();
+  const t = useTranslations();
+  const locale = useLocale();
+  const isRTL = locale === "ar";
+
+  const { addHadith: addToHistory, isHadithRead, markAsRead } = useHistory();
+  const { addHadith: addToFavorites, isHadithSaved } = useFavorites();
+
+  const collectionId = hadith.collection || hadith.collectionId || "unknown";
+  const collectionName = isRTL
+    ? collectionNamesAr[collectionId] || collectionId
+    : collectionNames[collectionId] || collectionId;
+
+  const { cleanArabic, cleanEnglish, rangeStr, narratorArabic, sanad, gradeInfo } = normalizeHadith(hadith);
+  const reference = getReference(hadith);
+
+  const isRead = isHadithRead(hadith.collectionId, hadith.hadithNumber);
+  const isSaved = isHadithSaved(hadith.collectionId, hadith.hadithNumber);
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const text = isRTL ? cleanArabic : cleanEnglish;
+    await navigator.clipboard.writeText(text).catch(() => {});
+  }, [isRTL, cleanArabic, cleanEnglish]);
+
+  const handleFavorite = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    addToFavorites(hadith);
+  }, [addToFavorites, hadith]);
 
   return (
-    <div className={`glass rounded-2xl overflow-hidden ${featured ? 'animate-glow' : ''}`}>
-      {/* Top accent line */}
-      <div className="h-1 bg-gradient-to-r from-accent-500 via-emerald-500 to-accent-500" />
-      
-      <div className="p-6 md:p-8">
-        {/* Copy buttons */}
-        <div className="flex justify-end gap-2 mb-4">
-          {arabic.content && (
-            <button onClick={() => copyText('arabic')} className="btn-icon group" title={t('hadith.copyArabic')}>
-              {copied === 'arabic' ? (
-                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4 group-hover:text-accent-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              )}
+    <article
+      className={`
+        rounded-xl border transition-all duration-200 cursor-pointer
+        ${detailed
+          ? "bg-gray-900 border-gray-800"
+          : "bg-gray-900/50 border-gray-800/50 hover:border-gray-700 hover:bg-gray-900"
+        }
+        ${isRead ? "border-l-2 border-l-amber-500" : ""}
+      `}
+      onClick={onClick}
+      dir={isRTL ? "rtl" : "ltr"}
+    >
+      <div className="p-5">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-1 bg-amber-500/10 text-amber-400 text-xs font-medium rounded-md">
+              {collectionName}
+            </span>
+            {rangeStr && (
+              <span className="text-xs text-gray-500">#{rangeStr}</span>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); handleFavorite(e); }}
+              className={`p-1.5 rounded-lg transition-colors ${
+                isSaved ? "text-amber-400 bg-amber-400/10" : "text-gray-500 hover:text-gray-300 hover:bg-gray-800"
+              }`}
+            >
+              <svg className="w-4 h-4" fill={isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
             </button>
-          )}
-          {english?.content && (
-            <button onClick={() => copyText('english')} className="btn-icon group" title={t('hadith.copyEnglish')}>
-              {copied === 'english' ? (
-                <svg className="w-4 h-4 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            {detailed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(`/speech-practice?urn=${hadith.arabic?.urn || hadith.arabic?.c0}`);
+                }}
+                className="p-1.5 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-gray-800 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
                 </svg>
-              ) : (
-                <svg className="w-4 h-4 group-hover:text-accent-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              )}
-            </button>
-          )}
+              </button>
+            )}
+          </div>
         </div>
 
-        {/* Narrator prefix */}
-        {arabic.narrator_prefix && (
-          <div className="flex items-start gap-2 mb-4 text-sm text-accent-400/80 bg-accent-500/5 rounded-xl px-4 py-3">
-            <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-            </svg>
-            <span className="font-arabic leading-relaxed">{arabic.narrator_prefix}</span>
-            {arabic.narrator_postfix && (
-              <span className="text-surface-500"> — {arabic.narrator_postfix}</span>
-            )}
-          </div>
-        )}
-
-        {/* Arabic text */}
-        {arabic.content && (
-          <div className="font-arabic text-xl md:text-2xl leading-[2.2] text-surface-100 text-right bg-surface-900/50 
-                        rounded-xl p-5 mb-4 border border-surface-800/50">
-            {arabic.content}
-          </div>
-        )}
-
-        {/* English text */}
-        {english?.content && (
-          <div className="text-surface-200 leading-relaxed bg-surface-900/30 rounded-xl p-5 mb-4 
-                        border-l-2 border-accent-500/50">
-            {english.narrator_prefix && (
-              <span className="font-semibold text-accent-400">{english.narrator_prefix} </span>
-            )}
-            {english.content}
-            {english.narrator_postfix && (
-              <span className="text-surface-500 italic"> ({english.narrator_postfix})</span>
-            )}
-          </div>
-        )}
-
-        {/* Meta tags */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          <span className="badge bg-surface-800/80 text-surface-300 border border-surface-700">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-            {colName.en}
-          </span>
-          {(arabic.display_number || arabic.order_in_book) && (
-            <span className="badge bg-surface-800/80 text-surface-300 border border-surface-700">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-              </svg>
-              #{arabic.display_number || arabic.order_in_book}
-            </span>
-          )}
-          {grade && (
-            <span className={grade.cls}>
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                {grade.icon === 'check' ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                ) : grade.icon === 'star' ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.963-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                )}
-              </svg>
-              {grade.label}
-            </span>
-          )}
-        </div>
-
-        {/* Sanad (Chain) */}
-        {detailed && sanad.length > 0 && (
-          <div className="bg-surface-900/50 rounded-xl p-5 border border-surface-800/50 mt-4">
-            <div className="flex items-center gap-2 mb-4 text-xs font-semibold text-accent-400 uppercase tracking-wider">
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
-              </svg>
-              {t('hadith.chain')}
-            </div>
-            <div className="space-y-1">
-              {sanad.map((narrator, i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-surface-800/50 transition-colors">
-                  <span className="text-surface-600 text-sm">{i === 0 ? '📖' : '↑'}</span>
-                  <span className="font-arabic text-sm text-surface-200">{narrator}</span>
-                </div>
-              ))}
-              <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg">
-                <span className="text-surface-600 text-sm">↑</span>
-                <span className="font-arabic text-sm text-accent-400 font-bold">
-                  {t('hadith.prophet')}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Comments */}
-        {arabic.comments && (
-          <div className="mt-4 px-4 py-3 bg-surface-900/30 rounded-xl border border-surface-800/30">
-            <p className="text-xs text-surface-500 italic">{arabic.comments}</p>
-          </div>
-        )}
-
-        {/* Narrators info */}
-        {arabic.narrators && detailed && (
-          <div className="mt-3 px-4 py-2 bg-surface-900/20 rounded-xl">
-            <p className="text-xs text-surface-500">
-              <span className="font-semibold text-surface-400">{t('hadith.narrators')}:</span>{' '}
-              {typeof arabic.narrators === 'string' 
-                ? arabic.narrators.slice(0, 120) + (arabic.narrators.length > 120 ? '...' : '')
-                : JSON.stringify(arabic.narrators).slice(0, 120)}
+        {/* Arabic Text */}
+        {cleanArabic && (
+          <div className={`mb-4 ${detailed ? "" : "line-clamp-3"}`}>
+            <p
+              dir="rtl"
+              className="text-xl md:text-2xl font-arabic leading-[2] text-white"
+            >
+              {cleanArabic}
             </p>
           </div>
         )}
+
+        {/* Grade (Sahih / Da'if / Hasan) */}
+        {gradeInfo.text && (
+          <div className="mb-3 flex items-center gap-2">
+            <span className={`px-2.5 py-1 text-xs font-medium rounded-md ${gradeInfo.colorClass}`}>
+              {gradeInfo.text}
+            </span>
+          </div>
+        )}
+
+        {/* Sanad (chain of narration) */}
+        {sanad && detailed && (
+          <div className="mb-3 px-3 py-2 bg-gray-800/50 rounded-lg">
+            <span className="text-xs text-gray-500 block mb-1">{t("hadith.chain")}</span>
+            <span className="text-sm text-gray-300 leading-relaxed" dir="rtl">
+              {sanad}
+            </span>
+          </div>
+        )}
+
+        {/* Reference */}
+        {reference && detailed && (
+          <div className="mb-3 px-3 py-2 bg-gray-800/50 rounded-lg">
+            <span className="text-xs text-gray-500 block mb-1">{t("hadith.reference")}</span>
+            <span className="text-sm text-gray-300">{reference}</span>
+          </div>
+        )}
+
+        {/* Narrator */}
+        {narratorArabic && detailed && (
+          <div className="mb-3 px-3 py-2 bg-gray-800/50 rounded-lg">
+            <span className="text-xs text-gray-500 mr-2">{t("hadith.narrator")}</span>
+            <span className="text-sm text-gray-300">{narratorArabic}</span>
+          </div>
+        )}
+
+        {/* English Translation */}
+        {cleanEnglish && (
+          <div className={`${detailed ? "mt-4 pt-4 border-t border-gray-800" : "line-clamp-2"}`}>
+            <p className={`text-sm text-gray-400 leading-relaxed ${!detailed && !expanded ? "line-clamp-2" : ""}`}>
+              {cleanEnglish}
+            </p>
+          </div>
+        )}
+
+        {/* Actions */}
+        {detailed && (
+          <div className="mt-4 pt-4 border-t border-gray-800 flex items-center gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); handleCopy(e); }}
+              className="px-3 py-1.5 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors"
+            >
+              {t("hadith.copy")}
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                markAsRead(hadith.collectionId, hadith.hadithNumber);
+                addToHistory(hadith);
+              }}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                isRead
+                  ? "text-amber-400 bg-amber-400/10"
+                  : "text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700"
+              }`}
+            >
+              {isRead ? t("hadith.markedRead") : t("hadith.markRead")}
+            </button>
+          </div>
+        )}
+
+        {/* Expand */}
+        {!detailed && cleanEnglish && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+            className="mt-3 text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            {expanded ? t("hadith.showLess") : t("hadith.showMore")}
+          </button>
+        )}
       </div>
-    </div>
+    </article>
   );
 }

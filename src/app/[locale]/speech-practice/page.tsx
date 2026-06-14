@@ -8,7 +8,8 @@ import { Hadith } from "@/types/hadith";
 import Navbar from "@/components/Navbar";
 import SalawatButton from "@/components/SalawatButton";
 import SpeechRecorder from "@/components/SpeechRecorder";
-import { SpeechResult, analyzeArabicSpeech } from "@/lib/speechAnalysis";
+import { SpeechResult, analyzeArabicSpeech, analyzeArabicSpeechAudio } from "@/lib/speechAnalysis";
+import { extractSanad, extractMatn, getGradeInfo, getReference } from "@/lib/hadithUtils";
 
 function SpeechPracticeContent() {
   const t = useTranslations();
@@ -80,20 +81,17 @@ function SpeechPracticeContent() {
     return () => clearTimeout(timeout);
   }, [searchQuery, performSearch]);
 
-  const handleRecordingComplete = async (audioBlob: Blob) => {
+  const handleRecordingComplete = async (spokenText: string) => {
     if (!hadith) return;
     setIsRecording(true);
     setError(null);
     setResult(null);
-    const arabicText = hadith.arabic?.content || hadith.arabic?.text || "";
     try {
-      const speechResult = await analyzeArabicSpeech(audioBlob, arabicText.replace(/:\s*/, " ").trim());
-      // If accuracy is 0 and feedback mentions API key, show as guidance not error
-      if (speechResult.accuracy === 0 && speechResult.feedback.some(f => f.includes('API key'))) {
-        setResult(speechResult); // Show the guidance UI
-      } else {
-        setResult(speechResult);
-      }
+      const speechResult = await analyzeArabicSpeech(
+        spokenText,
+        extractMatn(hadith).replace(/\s+/g, " ").trim()
+      );
+      setResult(speechResult);
     } catch (err: any) {
       setError(err?.message || "Failed to analyze recording. Check console for details.");
     } finally {
@@ -108,7 +106,10 @@ function SpeechPracticeContent() {
     setResult(null);
   };
 
-  const arabicText = hadith?.arabic?.content || hadith?.arabic?.text || "";
+  const arabicMatn = hadith ? extractMatn(hadith) : "";
+  const sanad = hadith ? extractSanad(hadith) : "";
+  const gradeInfo = hadith ? getGradeInfo(hadith) : { text: "", colorClass: "" };
+  const reference = hadith ? getReference(hadith) : "";
 
   return (
     <>
@@ -162,11 +163,44 @@ function SpeechPracticeContent() {
           ) : hadith ? (
             <div className="space-y-6">
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-                {arabicText && (
+                {/* Grade (Sahih / Da'if / Hasan) */}
+                {gradeInfo.text && (
+                  <div className="flex justify-center mb-4">
+                    <span className={`px-3 py-1 text-xs font-medium rounded-md ${gradeInfo.colorClass}`}>
+                      {gradeInfo.text}
+                    </span>
+                  </div>
+                )}
+
+                {/* Sanad (chain of narration) */}
+                {sanad && (
+                  <div className="mb-4 px-3 py-2 bg-gray-800/50 rounded-lg">
+                    <p className="text-xs text-gray-500 text-center mb-1">
+                      {t("hadith.chain")}
+                    </p>
+                    <p dir="rtl" className="text-sm text-gray-300 leading-relaxed text-center">
+                      {sanad}
+                    </p>
+                  </div>
+                )}
+
+                {/* Main text (matn) */}
+                {arabicMatn && (
                   <p dir="rtl" className="text-xl md:text-2xl font-arabic leading-[2] text-white text-center">
-                    {arabicText}
+                    {arabicMatn}
                   </p>
                 )}
+
+                {/* Reference */}
+                {reference && (
+                  <div className="mt-4 px-3 py-2 bg-gray-800/30 rounded-lg">
+                    <p className="text-xs text-gray-500 text-center">
+                      {t("hadith.reference")}: {reference}
+                    </p>
+                  </div>
+                )}
+
+                {/* English translation */}
                 {hadith.english && (
                   <p className="text-sm text-gray-400 mt-4 text-center">
                     {hadith.english?.text || hadith.english?.content || ""}
@@ -177,7 +211,6 @@ function SpeechPracticeContent() {
               <div className="bg-gray-900/50 border border-gray-800/50 rounded-xl p-6">
                 <h3 className="text-sm text-gray-400 text-center mb-4">{t("speech.recordingHint")}</h3>
                 <SpeechRecorder
-                  targetArabicText={arabicText}
                   onRecordingComplete={handleRecordingComplete}
                   disabled={isRecording}
                 />

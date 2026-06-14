@@ -216,7 +216,51 @@ export const hadithAPI = {
   
   async getRandomHadith(collectionId?: number) {
     const instance = await getDB();
-    const arabic = await instance.getRandomHadith(collectionId || null);
+    const sqlDb = (instance as any).db;
+    if (!sqlDb) throw new Error('DB not connected');
+
+    // Fast random: count rows, pick offset, LIMIT 1
+    // ORDER BY RANDOM() scans the entire table — very slow for 160K rows
+    let countSql = 'SELECT COUNT(*) as cnt FROM hadith_content';
+    let querySql = `
+      SELECT c0 as urn, c1 as collection_id, c2 as book_id, c3 as display_number,
+             c4 as order_in_book, c5 as chapter_id, c6 as narrator_prefix, c7 as content,
+             c8 as narrator_postfix, c9 as narrator_prefix_diacless,
+             c10 as content_diacless, c11 as narrator_postfix_diacless,
+             c12 as comments, c13 as grades, c14 as narrators, c15 as related_hadiths
+      FROM hadith_content
+    `;
+    const params: any[] = [];
+    
+    if (collectionId !== undefined && collectionId !== null) {
+      const where = ' WHERE c1 = ?';
+      countSql += where;
+      querySql += where;
+      params.push(collectionId);
+    }
+
+    const countStmt = sqlDb.prepare(countSql);
+    if (params.length) countStmt.bind(params);
+    let totalRows = 0;
+    if (countStmt.step()) {
+      totalRows = countStmt.getAsObject().cnt;
+    }
+    countStmt.free();
+
+    if (totalRows === 0) return { arabic: null, english: null };
+
+    const offset = Math.floor(Math.random() * totalRows);
+    querySql += ' LIMIT 1 OFFSET ?';
+    
+    const stmt = sqlDb.prepare(querySql);
+    stmt.bind([...params, offset]);
+    
+    let arabic = null;
+    if (stmt.step()) {
+      arabic = stmt.getAsObject();
+    }
+    stmt.free();
+
     let english = null;
     if (arabic) english = await queryEnglishByUrn(arabic.urn);
     return { arabic, english };

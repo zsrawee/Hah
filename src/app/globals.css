@@ -2,149 +2,115 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Naskh+Arabic:wght@400;500;600;700&display=swap');
-
-@layer base {
-  :root {
-    --gold: #C9A84C;
-    --gold-light: #E8D48B;
-    --teal: #1A7A6B;
-    --teal-light: #2AA88F;
-    --navy: #0A1F2E;
-    --cream: #F5EDD6;
-  }
-
-  html {
-    scroll-behavior: smooth;
-  }
-
-  body {
-    @apply bg-surface-950 text-surface-100 font-sans antialiased;
-    min-height: 100vh;
-  }
-
-  ::selection {
-    @apply bg-accent-500/30 text-accent-200;
-  }
-
-  ::-webkit-scrollbar {
-    width: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    @apply bg-surface-950;
-  }
-  ::-webkit-scrollbar-thumb {
-    @apply bg-surface-700 rounded-full;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-surface-600;
-  }
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
 }
 
-@layer components {
-  .glass {
-    @apply bg-surface-900/80 backdrop-blur-xl border border-surface-700/50;
-  }
-
-  .glass-light {
-    @apply bg-surface-800/40 backdrop-blur-lg border border-surface-700/30;
-  }
-
-  .card {
-    @apply glass-light rounded-xl transition-all duration-300 hover:border-accent-500/30;
-  }
-
-  .card-hover {
-    @apply hover:translate-y-[-2px] hover:shadow-lg hover:shadow-accent-500/5;
-  }
-
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg font-medium text-sm
-           transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-surface-950;
-  }
-
-  .btn-primary {
-    @apply btn bg-accent-600 text-white hover:bg-accent-500 focus:ring-accent-500
-           shadow-lg shadow-accent-500/20;
-  }
-
-  .btn-secondary {
-    @apply btn bg-surface-800 text-surface-200 hover:bg-surface-700 border border-surface-700
-           focus:ring-surface-600;
-  }
-
-  .btn-ghost {
-    @apply btn text-surface-400 hover:text-surface-200 hover:bg-surface-800;
-  }
-
-  .btn-icon {
-    @apply w-9 h-9 flex items-center justify-center rounded-lg
-           text-surface-400 hover:text-surface-200 hover:bg-surface-800
-           transition-all duration-200;
-  }
-
-  .badge {
-    @apply inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-sahih {
-    @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
-  }
-
-  .badge-hasan {
-    @apply badge bg-accent-500/15 text-accent-400 border border-accent-500/20;
-  }
-
-  .badge-daif {
-    @apply badge bg-red-500/15 text-red-400 border border-red-500/20;
-  }
-
-  .input {
-    @apply w-full px-4 py-3 bg-surface-900/80 border border-surface-700 rounded-xl
-           text-surface-100 placeholder-surface-500
-           focus:outline-none focus:ring-2 focus:ring-accent-500/30 focus:border-accent-500/50
-           transition-all duration-200;
-  }
-
-  .select {
-    @apply input appearance-none cursor-pointer;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23eab308'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    background-size: 20px;
-  }
-
-  .skeleton {
-    @apply bg-surface-800/60 rounded-lg animate-pulse;
-  }
-
-  .hadith-text {
-    @apply font-arabic leading-[2.2] text-right;
-  }
-
-  /* Animations */
-  .animate-fade-in {
-    animation: fadeIn 0.5s ease-out;
-  }
-  .animate-slide-up {
-    animation: slideUp 0.5s ease-out;
-  }
-  .animate-scale-in {
-    animation: scaleIn 0.3s ease-out;
-  }
+* {
+  box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #27272a transparent;
+}
+
+/* Focus */
+*:focus-visible {
+  outline: 2px solid #f59e0b;
+  outline-offset: 2px;
+}
+
+/* Animations */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.95); }
+  from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: scale(1); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.5s ease-out;
+}
+
+.animate-slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.2s ease-out;
+}
+
+/* Skeleton loading */
+.skeleton {
+  background: linear-gradient(90deg, #18181b 0%, #27272a 50%, #18181b 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Arabic text */
+.font-arabic {
+  font-family: "Amiri", "Traditional Arabic", "Scheherazade New", serif;
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(24, 24, 27, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(39, 39, 42, 0.5);
 }
