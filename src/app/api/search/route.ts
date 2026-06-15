@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hadithAPI } from '@/lib/hadith-db';
+import { rateLimit, getClientIp } from '@/lib/rate-limiter';
 
 // Map UI slugs to numeric collection IDs
 const LONG_SLUG_TO_ID: Record<string, number> = {
@@ -33,10 +34,24 @@ const ID_TO_SLUG: Record<number, string> = {
   101: 'nawawi-40',
 };
 
+const VALID_COLLECTION_IDS = new Set(Object.keys(ID_TO_SLUG).map(Number));
+const MAX_QUERY_LENGTH = 200;
+const MAX_LIMIT = 100;
+
+/**
+ * Strip control characters and limit query length to prevent abuse.
+ */
+function sanitizeQuery(input: string): string {
+  return input.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, MAX_QUERY_LENGTH);
+}
+
 function resolveCollectionId(input: string | null): number | undefined {
   if (!input) return undefined;
   // If it's already a numeric ID, parse directly
-  if (/^\d+$/.test(input)) return parseInt(input);
+  if (/^\d+$/.test(input)) {
+    const n = parseInt(input, 10);
+    return VALID_COLLECTION_IDS.has(n) ? n : undefined;
+  }
   // Otherwise look up in the slug map
   const lower = input.toLowerCase().replace(/[^a-z0-9-]/g, '');
   return LONG_SLUG_TO_ID[lower] || undefined;
@@ -44,14 +59,29 @@ function resolveCollectionId(input: string | null): number | undefined {
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const query = searchParams.get('q') || '';
-    const collectionId = resolveCollectionId(searchParams.get('collection'));
-    const limit = parseInt(searchParams.get('limit') || '30');
+    // Rate limiting
+    const ip = getClientIp(req);
+    const { allowed } = rateLimit(`search:${ip}`, { max: 30, windowSeconds: 60 });
+    if (!allowed) {
+      return NextResponse.json({ error: 'Too many requests. Please slow down.' }, { status: 429 });
+    }
 
-    if (!query.trim()) {
+    const { searchParams } = new URL(req.url);
+    const rawQuery = searchParams.get('q') || '';
+    const query = sanitizeQuery(rawQuery);
+
+    if (!query) {
       return NextResponse.json({ results: [], count: 0 });
     }
+
+    // Validate limit
+    const rawLimit = searchParams.get('limit') || '30';
+    const limit = parseInt(rawLimit, 10);
+    if (isNaN(limit) || limit < 1 || limit > MAX_LIMIT) {
+      return NextResponse.json({ error: `Invalid limit. Must be between 1 and ${MAX_LIMIT}.` }, { status: 400 });
+    }
+
+    const collectionId = resolveCollectionId(searchParams.get('collection'));
 
     const { arabic, english, total } = await hadithAPI.search(query, collectionId, limit);
 
@@ -88,7 +118,6 @@ export async function GET(req: NextRequest) {
       const key = `urn:${h.arabic_urn}`;
       const cid = h.collection_id;
       if (merged.has(key)) {
-        // English already has Arabic counterpart – set the english field
         merged.get(key)!.english = {
           urn: h.arabic_urn,
           arabic_urn: h.arabic_urn,
@@ -101,7 +130,6 @@ export async function GET(req: NextRequest) {
           text: h.content || '',
         };
       } else {
-        // English-only result – still include it so it shows
         merged.set(key, {
           id: key,
           urn: h.arabic_urn,
@@ -126,7 +154,6 @@ export async function GET(req: NextRequest) {
     }
 
     const combined = Array.from(merged.values());
-    // Exclude total to avoid confusion – count = combined.length
     return NextResponse.json({ results: combined, count: combined.length });
   } catch (err: any) {
     console.error('API Error (search):', err);

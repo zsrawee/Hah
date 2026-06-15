@@ -4,7 +4,7 @@
  * Base URL: https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/
  */
 
-const API_BASE = 'https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/';
+const API_BASE = process.env.HADITH_API_BASE_URL || 'https://cdn.jsdelivr.net/gh/fawazahmed0/hadith-api@1/editions/';
 
 // Pre-computed hadith counts per collection (for random hadith without fetching full edition)
 const COLLECTION_SIZES: Record<number, number> = {

@@ -24,6 +24,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { rateLimit, getClientIp } from '@/lib/rate-limiter';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Arabic Text Utilities
@@ -234,12 +235,31 @@ function analyzeSpeech(spokenText: string, referenceText: string): AnalysisResul
 // POST handler
 // ═══════════════════════════════════════════════════════════════════════════
 
+const MAX_TARGET_TEXT_LENGTH = 5000;
+const MAX_AUDIO_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const audioFile = formData.get('audio') as Blob | null;
     const targetText = (formData.get('targetText') || formData.get('text')) as string | null;
     const spokenText = formData.get('spokenText') as string | null;
+
+    // Validate target text length
+    if (targetText && targetText.length > MAX_TARGET_TEXT_LENGTH) {
+      return NextResponse.json(
+        { error: 'Target text too long. Maximum length is ' + MAX_TARGET_TEXT_LENGTH + ' characters.' },
+        { status: 400 },
+      );
+    }
+
+    // Validate audio file size
+    if (audioFile && audioFile.size > MAX_AUDIO_SIZE_BYTES) {
+      return NextResponse.json(
+        { error: 'Audio file too large. Maximum size is 10 MB.' },
+        { status: 400 },
+      );
+    }
 
     if (!targetText) {
       return NextResponse.json(
@@ -249,6 +269,16 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Get the transcribed text ──
+    // Rate limiting: max 20 speech reviews per minute per IP
+    const ip = getClientIp(req);
+    const { allowed: rateAllowed } = rateLimit(`speech-review:${ip}`, { max: 20, windowSeconds: 60 });
+    if (!rateAllowed) {
+      return NextResponse.json(
+        { error: 'Too many speech reviews. Please slow down.' },
+        { status: 429 },
+      );
+    }
+
     let transcription: string | null = spokenText;
 
     // If no transcription provided, try to transcribe audio
