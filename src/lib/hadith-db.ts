@@ -286,6 +286,24 @@ export const hadithAPI = {
     return null;
   },
 
+  /**
+   * Normalize Arabic text for better search matching.
+   * Strips tashkeel (diacritics), normalizes alef/hamza variants,
+   * normalizes teh marbuta, strips tatweel.
+   */
+  normalizeArabic(text: string): string {
+    return text
+      .replace(/[\u064B-\u065F\u0670]/g, '')           // strip tashkeel (fatha, damma, kasra, shadda, sukun, etc.)
+      .replace(/[\u0610-\u061A]/g, '')                   // strip Arabic number signs
+      .replace(/\u0640/g, '')                              // strip tatweel (ـ)
+      .replace(/[\u0622\u0623\u0625]/g, '\u0627')       // normalize alef: آ أ إ → ا
+      .replace(/\u0649/g, '\u064A')                       // normalize alif maqsura: ى → ي
+      .replace(/\u0624/g, '\u0648')                       // normalize waw with hamza: ؤ → و
+      .replace(/\u0626/g, '\u064A')                       // normalize ya with hamza: ئ → ي
+      .replace(/\u0629/g, '\u0647')                       // normalize teh marbuta: ة → ه
+      .toLowerCase();
+  },
+
   async search(query: string, collectionId?: number, limit = 20) {
     const slugs = collectionId
       ? [COLLECTION_MAP[collectionId]].filter(Boolean)
@@ -293,7 +311,12 @@ export const hadithAPI = {
 
     const results: { arabic: any[]; english: any[] } = { arabic: [], english: [] };
     const terms = query.toLowerCase().split(/[\s,]+/).filter(Boolean);
+    const hasArabic = terms.some(t => /[\u0600-\u06FF]/.test(t));
     const engTerms = terms.filter(t => /[a-z]/.test(t));
+
+    // Normalize Arabic terms for matching
+    const arabicTerms = terms.filter(t => /[\u0600-\u06FF]/.test(t));
+    const normalizedArabicTerms = arabicTerms.map(t => this.normalizeArabic(t));
 
     for (const slug of slugs) {
       if (results.arabic.length >= limit && results.english.length >= limit) break;
@@ -304,12 +327,18 @@ export const hadithAPI = {
           fetchEdition(slug, 'eng'),
         ]);
 
-        // Arabic search
-        if (results.arabic.length < limit) {
+        // Arabic search – match against both raw and normalized text
+        if (hasArabic && results.arabic.length < limit) {
           for (const h of edition.hadiths) {
             if (results.arabic.length >= limit) break;
             const text = (h.text || '').toLowerCase();
-            if (terms.every(t => text.includes(t))) {
+            const normalizedText = this.normalizeArabic(text);
+            
+            // Check both raw text and normalized text for matches
+            const matchesRaw = arabicTerms.every(t => text.includes(t));
+            const matchesNormalized = normalizedArabicTerms.every(t => normalizedText.includes(t));
+            
+            if (matchesRaw || matchesNormalized) {
               const cid = SLUG_TO_ID[slug];
               const en = engEdition.hadiths.find((e: any) => e.hadithnumber === h.hadithnumber);
               results.arabic.push(formatHadith(h, cid, en || null));
