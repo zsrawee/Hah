@@ -85,7 +85,7 @@ export default function BrowsePage() {
                 >
                   <div className="text-sm font-medium mb-1 line-clamp-1">{book.name}</div>
                   <div className="text-xs text-gray-500">
-                    {book.hadithCount.toLocaleString()} {t("browse.hadiths")}
+                    {book.hadithCount?.toLocaleString() || "0"} {t("browse.hadiths")}
                   </div>
                 </button>
               ))}
